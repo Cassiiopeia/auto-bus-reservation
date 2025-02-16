@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - test
   workflow_dispatch:
 
 jobs:
@@ -24,12 +25,12 @@ jobs:
 
       - name: Create application.yml from secret
         run: |
-          mkdir -p src/main/resources  # 디렉토리 없으면 생성
+          mkdir -p src/main/resources
           echo "${{ secrets.APPLICATION_YML }}" > src/main/resources/application.yml
 
       - name: Create application-prod.yml from secret
         run: |
-          mkdir -p src/main/resources  # 디렉토리 없으면 생성
+          mkdir -p src/main/resources
           echo "${{ secrets.APPLICATION_PROD_YML }}" > src/main/resources/application-prod.yml
 
       - name: Build with Gradle
@@ -58,6 +59,17 @@ jobs:
     needs: build
     runs-on: ubuntu-20.04
     steps:
+      - name: Determine Environment Variables
+        id: env
+        run: |
+          if [[ "${{ github.ref_name }}" == "main" ]]; then
+            echo "CONTAINER_NAME=somansa-bus-auto-back" >> $GITHUB_ENV
+            echo "PORT=8091" >> $GITHUB_ENV
+          elif [[ "${{ github.ref_name }}" == "test" ]]; then
+            echo "CONTAINER_NAME=somansa-bus-auto-back-test" >> $GITHUB_ENV
+            echo "PORT=8092" >> $GITHUB_ENV
+          fi
+
       - name: Deploy
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -66,51 +78,31 @@ jobs:
           password: ${{ secrets.SERVER_PASSWORD }}
           port: 2022
           script: |
-            set -e  # 에러 발생 시 스크립트 중단
+            set -e
 
             echo "환경 변수 설정 중..."
             export PATH=$PATH:/usr/local/bin
             export PW=${{ secrets.SERVER_PASSWORD }}
-            
-            # 컨테이너 이름 및 포트 설정
-            CONTAINER_NAME_1="somansa-bus-auto-1"
-            CONTAINER_NAME_2="somansa-bus-auto-2"
-            PORT_1=8091
-            PORT_2=8092
 
-            echo "컨테이너 이름 1: $CONTAINER_NAME_1, 포트 1: $PORT_1"
-            echo "컨테이너 이름 2: $CONTAINER_NAME_2, 포트 2: $PORT_2"
+            echo "컨테이너 이름: $CONTAINER_NAME, 포트: $PORT"
 
-            echo "도커 이미지 풀: ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:main"
-            echo $PW | sudo -S docker pull ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:main
+            echo "도커 이미지 풀: ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ github.ref_name }}"
+            echo $PW | sudo -S docker pull ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ github.ref_name }}
 
-            # 기존 컨테이너 중지 및 삭제
-            for CONTAINER in $CONTAINER_NAME_1 $CONTAINER_NAME_2; do
-              echo "컨테이너 $CONTAINER 존재 여부 확인 중..."
-              if sudo docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER}$"; then
-                echo "컨테이너 $CONTAINER 이(가) 존재합니다. 중지 및 삭제 중..."
-                echo $PW | sudo -S docker rm -f $CONTAINER
-                echo "컨테이너 $CONTAINER 이(가) 삭제되었습니다."
-              else
-                echo "존재하는 컨테이너 $CONTAINER 이(가) 없습니다."
-              fi
-            done
+            echo "기존 컨테이너 중지 및 삭제 중..."
+            if sudo docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}$"; then
+              echo "기존 컨테이너 $CONTAINER_NAME 존재, 중지 및 삭제 중..."
+              echo $PW | sudo -S docker rm -f $CONTAINER_NAME
+            else
+              echo "기존 컨테이너 없음"
+            fi
 
-            # 새로운 컨테이너 실행
-            echo "새로운 컨테이너 $CONTAINER_NAME_1 실행 중..."
-            echo $PW | sudo -S docker run -d -p ${PORT_1}:8080 --name $CONTAINER_NAME_1 \
+            echo "새로운 컨테이너 $CONTAINER_NAME 실행 중..."
+            echo $PW | sudo -S docker run -d -p ${PORT}:8080 --name $CONTAINER_NAME \
               -e TZ=Asia/Seoul \
               -e SPRING_PROFILES_ACTIVE=prod \
               -v /etc/localtime:/etc/localtime:ro \
               -v /volume1/projects/suh-project-utility:/mnt/suh-project-utility \
-              ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:main
-
-            echo "새로운 컨테이너 $CONTAINER_NAME_2 실행 중..."
-            echo $PW | sudo -S docker run -d -p ${PORT_2}:8080 --name $CONTAINER_NAME_2 \
-              -e TZ=Asia/Seoul \
-              -e SPRING_PROFILES_ACTIVE=prod \
-              -v /etc/localtime:/etc/localtime:ro \
-              -v /volume1/projects/suh-project-utility:/mnt/suh-project-utility \
-              ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:main
+              ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ github.ref_name }}
 
             echo "배포가 성공적으로 완료되었습니다."
