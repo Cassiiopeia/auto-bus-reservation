@@ -45,13 +45,16 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Convert branch name to lowercase
+        run: echo "BRANCH=$(echo ${{ github.ref_name }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v3
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ github.ref_name }}
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ env.BRANCH }}
           cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:cache
           cache-to: type=inline
 
@@ -59,18 +62,7 @@ jobs:
     needs: build
     runs-on: ubuntu-20.04
     steps:
-      - name: Determine Environment Variables
-        id: env
-        run: |
-          if [[ "${{ github.ref_name }}" == "main" ]]; then
-            echo "CONTAINER_NAME=somansa-bus-auto-back" >> $GITHUB_ENV
-            echo "PORT=8091" >> $GITHUB_ENV
-          elif [[ "${{ github.ref_name }}" == "test" ]]; then
-            echo "CONTAINER_NAME=somansa-bus-auto-back-test" >> $GITHUB_ENV
-            echo "PORT=8092" >> $GITHUB_ENV
-          fi
-
-      - name: Deploy
+      - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
@@ -83,26 +75,43 @@ jobs:
             echo "환경 변수 설정 중..."
             export PATH=$PATH:/usr/local/bin
             export PW=${{ secrets.SERVER_PASSWORD }}
+            export BRANCH="${{ env.BRANCH }}"
 
-            echo "컨테이너 이름: $CONTAINER_NAME, 포트: $PORT"
+            # 기본 값 설정
+            export PORT=8080
+            export CONTAINER_NAME="somansa-bus-auto-back"
 
-            echo "도커 이미지 풀: ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ github.ref_name }}"
-            echo $PW | sudo -S docker pull ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ github.ref_name }}
+            if [ "$BRANCH" == "main" ]; then
+              PORT=8091
+            elif [ "$BRANCH" == "test" ]; then
+              CONTAINER_NAME="somansa-bus-auto-back-test"
+              PORT=8092
+            fi
 
-            echo "기존 컨테이너 중지 및 삭제 중..."
+            echo "브랜치: $BRANCH"
+            echo "컨테이너 이름: $CONTAINER_NAME"
+            echo "포트: $PORT"
+
+            echo "도커 이미지 풀: ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${BRANCH}"
+            echo $PW | sudo -S docker pull ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${BRANCH}
+
+            echo "기존 컨테이너 $CONTAINER_NAME 중지 및 삭제 중..."
             if sudo docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}$"; then
-              echo "기존 컨테이너 $CONTAINER_NAME 존재, 중지 및 삭제 중..."
-              echo $PW | sudo -S docker rm -f $CONTAINER_NAME
+              echo $PW | sudo -S docker stop $CONTAINER_NAME
+              echo $PW | sudo -S docker rm $CONTAINER_NAME
+              echo "컨테이너 $CONTAINER_NAME 삭제 완료."
             else
-              echo "기존 컨테이너 없음"
+              echo "기존 컨테이너 없음."
             fi
 
             echo "새로운 컨테이너 $CONTAINER_NAME 실행 중..."
             echo $PW | sudo -S docker run -d -p ${PORT}:8080 --name $CONTAINER_NAME \
+              --network somansa-bus-network \
+              -v /var/run/docker.sock:/var/run/docker.sock \
               -e TZ=Asia/Seoul \
               -e SPRING_PROFILES_ACTIVE=prod \
               -v /etc/localtime:/etc/localtime:ro \
-              -v /volume1/projects/suh-project-utility:/mnt/suh-project-utility \
-              ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ github.ref_name }}
+              -v /volume1/projects/somansa-busin:/mnt/somansa-busin \
+              ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${BRANCH}
 
             echo "배포가 성공적으로 완료되었습니다."
