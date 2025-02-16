@@ -45,16 +45,15 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Convert branch name to lowercase
-        run: echo "BRANCH=$(echo ${{ github.ref_name }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_ENV
-
       - name: Build and push Docker image
         uses: docker/build-push-action@v3
         with:
           context: .
           file: ./Dockerfile
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ env.BRANCH }}
+          tags: |
+            ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:main
+            ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:test
           cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:cache
           cache-to: type=inline
 
@@ -75,43 +74,46 @@ jobs:
             echo "환경 변수 설정 중..."
             export PATH=$PATH:/usr/local/bin
             export PW=${{ secrets.SERVER_PASSWORD }}
-            export BRANCH="${{ env.BRANCH }}"
 
-            # 기본 값 설정
-            export PORT=8080
-            export CONTAINER_NAME="somansa-bus-auto-back"
-
-            if [ "$BRANCH" == "main" ]; then
+            # 브랜치에 따른 컨테이너명 & 포트
+            if [[ "${{ github.ref_name }}" == "main" ]]; then
+              CONTAINER_NAME="somansa-bus-auto-back"
               PORT=8091
-            elif [ "$BRANCH" == "test" ]; then
+              IMAGE_TAG="main"
+            elif [[ "${{ github.ref_name }}" == "test" ]]; then
               CONTAINER_NAME="somansa-bus-auto-back-test"
               PORT=8092
+              IMAGE_TAG="test"
+            else
+              echo "🚨 지원되지 않는 브랜치입니다: ${{ github.ref_name }}"
+              exit 1
             fi
 
-            echo "브랜치: $BRANCH"
+            echo "배포할 브랜치: ${{ github.ref_name }}"
             echo "컨테이너 이름: $CONTAINER_NAME"
             echo "포트: $PORT"
+            echo "도커 이미지 태그: $IMAGE_TAG"
 
-            echo "도커 이미지 풀: ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${BRANCH}"
-            echo $PW | sudo -S docker pull ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${BRANCH}
+            echo "도커 이미지 풀: ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:$IMAGE_TAG"
+            echo $PW | sudo -S docker pull ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:$IMAGE_TAG
 
             echo "기존 컨테이너 $CONTAINER_NAME 중지 및 삭제 중..."
             if sudo docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}$"; then
               echo $PW | sudo -S docker stop $CONTAINER_NAME
               echo $PW | sudo -S docker rm $CONTAINER_NAME
-              echo "컨테이너 $CONTAINER_NAME 삭제 완료."
+              echo "✅ 컨테이너 $CONTAINER_NAME 삭제 완료."
             else
-              echo "기존 컨테이너 없음."
+              echo "🟢 기존 컨테이너 없음."
             fi
 
-            echo "새로운 컨테이너 $CONTAINER_NAME 실행 중..."
+            echo "🚀 새로운 컨테이너 $CONTAINER_NAME 실행 중..."
             echo $PW | sudo -S docker run -d -p ${PORT}:8080 --name $CONTAINER_NAME \
               --network somansa-bus-network \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -e TZ=Asia/Seoul \
               -e SPRING_PROFILES_ACTIVE=prod \
               -v /etc/localtime:/etc/localtime:ro \
-              -v /volume1/projects/somansa-busin:/mnt/somansa-busin \
-              ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${BRANCH}
+              -v /volume1/projects/somansa-bus-auto:/mnt/somansa-bus-auto \
+              ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:$IMAGE_TAG
 
-            echo "배포가 성공적으로 완료되었습니다."
+            echo "🎉 배포가 성공적으로 완료되었습니다."
