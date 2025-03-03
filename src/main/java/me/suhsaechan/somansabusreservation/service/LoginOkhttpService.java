@@ -23,13 +23,19 @@ public class LoginOkhttpService {
   private String loginUrl;
 
   @Value("${somansa.busin.login-id:chan4760@somansa.com}")
-  private String loginId;
+  private String defaultLoginId;
 
   private static final String PUSH_ID = "pc";
 
   private final OkHttpClient client = CommonHttpClient.getClient();
 
-  public int login() {
+  /**
+   * 지정된 사용자 ID로 로그인합니다.
+   *
+   * @param loginId 로그인 ID (이메일)
+   * @return 성공 시 승객 ID, 실패 시 음수 값
+   */
+  public int login(String loginId) {
     log.info("로그인 시작: {}", loginId);
 
     // 1. 로그인 페이지 GET (세션 쿠키 획득)
@@ -41,7 +47,8 @@ public class LoginOkhttpService {
 
     try (Response getResponse = client.newCall(getRequest).execute()) {
       if (!getResponse.isSuccessful()) {
-        log.error("로그인 페이지 GET 실패, 코드: {}", getResponse.code());
+        int statusCode = getResponse.code();
+        log.error("로그인 페이지 GET 실패, 코드: {}", statusCode);
         return -1;
       }
       log.debug("로그인 페이지 GET 성공, 세션 쿠키 획득");
@@ -66,8 +73,10 @@ public class LoginOkhttpService {
         .build();
 
     try (Response response = client.newCall(postRequest).execute()) {
+      int statusCode = response.code();
+
       if (!response.isSuccessful()) {
-        log.error("로그인 POST 실패, 코드: {}", response.code());
+        log.error("로그인 POST 실패, 코드: {}", statusCode);
         return -1;
       }
 
@@ -77,17 +86,26 @@ public class LoginOkhttpService {
       ObjectMapper mapper = new ObjectMapper();
       JsonNode rootNode = mapper.readTree(responseBody);
       int passengerId = rootNode.path("d").asInt();
-      log.info("로그인 결과, passengerId: {}", passengerId);
 
       if (passengerId > 0) {
-        log.info("로그인 성공: {}", loginId);
+        log.info("로그인 성공: {}, 승객ID: {}", loginId, passengerId);
       } else {
-        log.warn("로그인 실패, d 값: {}", passengerId);
+        log.warn("로그인 실패: {}, 응답 값: {}", loginId, passengerId);
       }
+
       return passengerId;
     } catch (IOException e) {
       log.error("로그인 POST 중 예외 발생", e);
       return -1;
     }
+  }
+
+  /**
+   * 기본 ID로 로그인합니다 (하위 호환성 유지).
+   *
+   * @return 성공 시 승객 ID, 실패 시 음수 값
+   */
+  public int login() {
+    return login(defaultLoginId);
   }
 }

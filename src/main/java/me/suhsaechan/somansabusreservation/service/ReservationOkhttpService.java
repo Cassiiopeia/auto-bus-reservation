@@ -13,6 +13,8 @@ import org.springframework.stereotype.Service;
 import java.io.IOException;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 
 @Service
 @Slf4j
@@ -23,18 +25,29 @@ public class ReservationOkhttpService {
   private String reservationUrl;
 
   private final OkHttpClient client = CommonHttpClient.getClient();
+  private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd");
 
-  public boolean makeReservation(int passengerId, BusRoute busRoute) {
-    log.info("예약 시작: passengerId={}, busRoute={}", passengerId, busRoute.getDescription());
+  /**
+   * 지정된 날짜에 버스 예약을 수행합니다.
+   *
+   * @param passengerId 승객 ID
+   * @param busRoute 버스 노선
+   * @param reservationDate 예약 날짜
+   * @return 예약 성공 여부
+   */
+  public boolean makeReservation(int passengerId, BusRoute busRoute, LocalDate reservationDate) {
+    String formattedDate = reservationDate.format(DATE_FORMATTER);
+    log.info("예약 시작 - 승객ID: {}, 버스: {}, 예약일: {}",
+        passengerId, busRoute.getDescription(), formattedDate);
 
-    String today = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+    // 페이로드 생성
     ObjectMapper mapper = new ObjectMapper();
     ObjectNode payload = mapper.createObjectNode();
     payload.put("passengerid", passengerId);
     payload.put("disptid", busRoute.getDisptid());
     payload.put("caralias", busRoute.getCaralias());
     payload.put("clientid", "busman");
-    payload.put("createdate", today);
+    payload.put("createdate", formattedDate);
 
     String payloadJson = payload.toString();
     log.debug("예약 페이로드: {}", payloadJson);
@@ -45,6 +58,7 @@ public class ReservationOkhttpService {
         "&shuttletype=" + encodedShuttleType + "&scr=0&isshuttle=0";
     log.debug("Referer URL: {}", refererUrl);
 
+    // HTTP 요청 구성
     MediaType mediaType = MediaType.get("application/json; charset=utf-8");
     RequestBody body = RequestBody.create(payloadJson, mediaType);
 
@@ -56,16 +70,36 @@ public class ReservationOkhttpService {
         .addHeader("Referer", refererUrl)
         .build();
 
+    // HTTP 요청 실행
     try (Response response = client.newCall(request).execute()) {
+      int responseCode = response.code();
+
       if (!response.isSuccessful()) {
-        log.error("예약 실패, 코드: {}, 응답: {}", response.code(), response.body() != null ? response.body().string() : "없음");
+        String responseBody = response.body() != null ? response.body().string() : "응답 없음";
+        log.error("예약 실패 - HTTP 상태 코드: {}, 응답: {}", responseCode, responseBody);
         return false;
       }
-      log.info("예약 성공: {}", busRoute.getDescription());
+
+      String responseBody = response.body() != null ? response.body().string() : "";
+      log.debug("예약 응답: {}", responseBody);
+      log.info("예약 성공 - 버스: {}, 예약일: {}", busRoute.getDescription(), formattedDate);
+
+      // TODO: 향후 DB에 예약 결과 저장 및 알림 발송 로직 추가
       return true;
     } catch (IOException e) {
       log.error("예약 중 예외 발생", e);
       return false;
     }
+  }
+
+  /**
+   * 당일 예약을 위한 오버로딩 메소드 (하위 호환성 유지)
+   *
+   * @param passengerId 승객 ID
+   * @param busRoute 버스 노선
+   * @return 예약 성공 여부
+   */
+  public boolean makeReservation(int passengerId, BusRoute busRoute) {
+    return makeReservation(passengerId, busRoute, LocalDate.now());
   }
 }
