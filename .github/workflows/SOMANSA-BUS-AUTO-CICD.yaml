@@ -9,16 +9,17 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Set up JDK 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
@@ -45,21 +46,33 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Cache Docker layers
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ hashFiles('Dockerfile') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
+
       - name: Build and push Docker image
-        uses: docker/build-push-action@v3
+        uses: docker/build-push-action@v5
         with:
           context: .
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:main
-            ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:test
-          cache-from: type=registry,ref=${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:cache
-          cache-to: type=inline
+            ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:${{ github.ref_name }}
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+
+      - name: Move Docker cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
 
   deploy:
     needs: build
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     steps:
       - name: Deploy to server
         uses: appleboy/ssh-action@v1.0.3
@@ -75,7 +88,6 @@ jobs:
             export PATH=$PATH:/usr/local/bin
             export PW=${{ secrets.SERVER_PASSWORD }}
 
-            # 브랜치에 따른 컨테이너명 & 포트
             if [[ "${{ github.ref_name }}" == "main" ]]; then
               CONTAINER_NAME="somansa-bus-auto-back"
               PORT=8091
@@ -85,7 +97,7 @@ jobs:
               PORT=8092
               IMAGE_TAG="test"
             else
-              echo "🚨 지원되지 않는 브랜치입니다: ${{ github.ref_name }}"
+              echo "지원되지 않는 브랜치입니다: ${{ github.ref_name }}"
               exit 1
             fi
 
@@ -101,9 +113,9 @@ jobs:
             if sudo docker ps -a --format '{{.Names}}' | grep -Eq "^${CONTAINER_NAME}$"; then
               echo $PW | sudo -S docker stop $CONTAINER_NAME
               echo $PW | sudo -S docker rm $CONTAINER_NAME
-              echo "✅ 컨테이너 $CONTAINER_NAME 삭제 완료."
+              echo "컨테이너 $CONTAINER_NAME 삭제 완료."
             else
-              echo "🟢 기존 컨테이너 없음."
+              echo "기존 컨테이너 없음."
             fi
 
             echo "🚀 새로운 컨테이너 $CONTAINER_NAME 실행 중..."
@@ -115,4 +127,4 @@ jobs:
               -v /volume1/projects/somansa-bus-auto:/mnt/somansa-bus-auto \
               ${{ secrets.DOCKERHUB_USERNAME }}/somansa-bus-auto:$IMAGE_TAG
 
-            echo "🎉 배포가 성공적으로 완료되었습니다."
+            echo "배포가 성공적으로 완료되었습니다."
