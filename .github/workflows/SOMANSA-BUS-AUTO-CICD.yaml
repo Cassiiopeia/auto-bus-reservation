@@ -90,7 +90,7 @@ jobs:
 
             if [[ "${{ github.ref_name }}" == "main" ]]; then
               CONTAINER_NAME="somansa-bus-auto-back"
-              PORT=8091
+              PORT=8095
               IMAGE_TAG="main"
             elif [[ "${{ github.ref_name }}" == "test" ]]; then
               CONTAINER_NAME="somansa-bus-auto-back-test"
