@@ -1,5 +1,5 @@
-# OpenJDK 17 기반 이미지 사용
-FROM openjdk:17-jdk-slim
+# Eclipse Temurin 17 기반 이미지 사용 (OpenJDK 공식 이미지 deprecated 대응)
+FROM eclipse-temurin:17-jdk-alpine
 
 # 작업 디렉토리 설정
 WORKDIR /app
