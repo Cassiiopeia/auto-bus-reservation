@@ -1,5 +1,5 @@
-# OpenJDK 17 기반 이미지 사용
-FROM openjdk:17-jdk-slim
+# Eclipse Temurin 17 JRE 사용 (openjdk:17-jdk-slim 이미지가 Docker Hub에서 제거되어 교체)
+FROM eclipse-temurin:17-jre-alpine
 
 # 작업 디렉토리 설정
 WORKDIR /app
